@@ -69,13 +69,10 @@ class PythonLiveEvaluator {
       );
       return;
     }
-
     if (!pythonExt.isActive) {
       await pythonExt.activate();
     }
-
     this.pythonApi = pythonExt.exports;
-
     let startCommand = vscode.commands.registerCommand(
       "pythonLiveEvaluator.start",
       () => {
@@ -197,7 +194,7 @@ print(f"VERSION:{sys.version}")
   async showGilStatus() {
     await this.checkFreethreadedPython();
     const status = this.isFreethreaded
-      ? "✅ Free-threaded Python (GIL disabled) - Parallelism enabled!"
+      ? "✅ Free-threaded Python (GIL disabled) - True parallelism enabled!"
       : "⚠️ Standard Python (GIL enabled) - Threading limited to I/O parallelism";
 
     vscode.window.showInformationMessage(status);
@@ -262,7 +259,7 @@ print(f"Total time: {threaded_time:.3f}s")
     this.outputChannel.appendLine(`Free-threaded mode: ${this.isFreethreaded}`);
 
     const config = vscode.workspace.getConfiguration("pythonLiveEvaluator");
-    const evaluationMode = config.get("evaluationMode", "explicit");
+    const evaluationMode = config.get("evaluationMode", "auto");
     this.outputChannel.appendLine(`Evaluation mode: ${evaluationMode}`);
 
     this.cumulativeCode = [];
@@ -284,6 +281,7 @@ print(f"Total time: {threaded_time:.3f}s")
         event.affectsConfiguration("pythonLiveEvaluator.evaluationMarkers")
       ) {
         this.clearDecorations();
+
         if (vscode.window.activeTextEditor?.document.languageId === "python") {
           this.evaluateDocument(vscode.window.activeTextEditor.document);
         }
@@ -517,6 +515,19 @@ print(f"Total time: {threaded_time:.3f}s")
                 } else if (cleanLine.includes("print")) {
                   if (result.output) {
                     decorationText = ` ▶ ${result.output}`;
+                    this.outputChannel.appendLine(
+                      `[DEBUG] Print output for line ${lineIdx}: "${result.output}"`
+                    );
+                  } else if (
+                    result.print_outputs &&
+                    result.print_outputs.length > 0
+                  ) {
+                    const lastPrint =
+                      result.print_outputs[result.print_outputs.length - 1];
+                    decorationText = ` ▶ ${lastPrint.text}`;
+                    this.outputChannel.appendLine(
+                      `[DEBUG] Using print_outputs for line ${lineIdx}: "${lastPrint.text}"`
+                    );
                   }
                 } else {
                   if (
@@ -580,7 +591,6 @@ print(f"Total time: {threaded_time:.3f}s")
               );
             }
           } else if (evaluationMode === "auto") {
-            // AUTO MODE - Show on last line of block
             this.outputChannel.appendLine(
               `[DEBUG] AUTO: Adding decoration to line ${block.endLine}`
             );
@@ -787,23 +797,22 @@ print(f"Total time: {threaded_time:.3f}s")
           inBlock = false;
         }
       } else {
-        if (
-          evaluationMode === "explicit" &&
-          lineHasMarker(line) &&
-          currentBlock.length > 0
-        ) {
+        if (evaluationMode === "explicit" && lineHasMarker(line)) {
+          if (currentBlock.length > 0) {
+            blocks.push({
+              code: currentBlock.join("\n"),
+              startLine: blockStartLine,
+              endLine: i - 1,
+            });
+          }
           blocks.push({
-            code: currentBlock.join("\n"),
-            startLine: blockStartLine,
-            endLine: i - 1,
+            code: line,
+            startLine: i,
+            endLine: i,
           });
-          currentBlock = [line];
-          blockStartLine = i;
-        } else if (
-          currentBlock.length > 0 &&
-          indent === 0 &&
-          !lineHasMarker(lines[i - 1])
-        ) {
+          currentBlock = [];
+          blockStartLine = i + 1;
+        } else if (currentBlock.length > 0 && indent === 0) {
           blocks.push({
             code: currentBlock.join("\n"),
             startLine: blockStartLine,
@@ -828,6 +837,18 @@ print(f"Total time: {threaded_time:.3f}s")
       });
     }
 
+    const debug = config.get("debug", false);
+    if (debug) {
+      this.outputChannel.appendLine("[DEBUG] Block parsing results:");
+      blocks.forEach((block, idx) => {
+        this.outputChannel.appendLine(
+          `[DEBUG]   Block ${idx + 1}: lines ${block.startLine}-${
+            block.endLine
+          }, code: "${block.code.substring(0, 50)}..."`
+        );
+      });
+    }
+
     return blocks;
   }
 
@@ -848,8 +869,25 @@ result = {
     'variables': {},
     'expression': None,
     'output': None,
-    'error': None
+    'error': None,
+    'print_outputs': []
 }
+
+_print_counter = 0
+_original_print = print
+
+def print(*args, **kwargs):
+    global _print_counter
+    output = io.StringIO()
+    _original_print(*args, file=output, **kwargs)
+    output_text = output.getvalue().rstrip()
+    result['print_outputs'].append({
+        'index': _print_counter,
+        'text': output_text
+    })
+    _print_counter += 1
+    _original_print(*args, **kwargs)
+    output.close()
 
 try:
     exec(${JSON.stringify(fullCode)})
@@ -858,7 +896,7 @@ try:
     locals_snapshot = list(locals().items())
 
     for k, v in locals_snapshot:
-        if not k.startswith('_') and k not in ['sys', 'io', 'json', 'ast', 'traceback', 'old_stdout', 'result', 'local_vars', 'locals_snapshot', 'k', 'v']:
+        if not k.startswith('_') and k not in ['sys', 'io', 'json', 'ast', 'traceback', 'old_stdout', 'result', 'local_vars', 'locals_snapshot', 'k', 'v', 'print']:
             try:
                 if callable(v):
                     if hasattr(v, '__name__'):
