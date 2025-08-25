@@ -479,7 +479,6 @@ print(f"Total time: {threaded_time:.3f}s")
 
                 const lineContent = lines[lineIdx].trim();
                 const cleanLine = lineContent.split("#")[0].trim();
-
                 let decorationText = "";
 
                 const isExpression =
@@ -514,9 +513,9 @@ print(f"Total time: {threaded_time:.3f}s")
                   }
                 } else if (cleanLine.includes("print")) {
                   if (result.output) {
-                    decorationText = ` ▶ ${result.output}`;
+                    decorationText = ` ▶ ${result.print_outputs[lineIdx].text}`;
                     this.outputChannel.appendLine(
-                      `[DEBUG] Print output for line ${lineIdx}: "${result.output}"`
+                      `[DEBUG] Print output for line ${lineIdx}: "${result.print_outputs[lineIdx].text}"`
                     );
                   } else if (
                     result.print_outputs &&
