@@ -513,9 +513,14 @@ print(f"Total time: {threaded_time:.3f}s")
                   }
                 } else if (cleanLine.includes("print")) {
                   if (result.output) {
-                    decorationText = ` ▶ ${result.print_outputs[lineIdx].text}`;
+                    const lines = result.output.split("\n");
+                    decorationText = ` ▶ ${
+                      result.print_outputs[lines.length - 1].text
+                    }`;
                     this.outputChannel.appendLine(
-                      `[DEBUG] Print output for line ${lineIdx}: "${result.print_outputs[lineIdx].text}"`
+                      `[DEBUG] Print output for line ${lineIdx}: "${
+                        result.print_outputs[lines.length - 1].text
+                      }"`
                     );
                   } else if (
                     result.print_outputs &&
