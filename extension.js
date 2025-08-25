@@ -353,6 +353,10 @@ print(f"Total time: {threaded_time:.3f}s")
 
     this.cumulativeCode = [];
 
+    let previousVariables = {};
+    let previousOutputLength = 0;
+    let previousPrintCount = 0;
+
     const config = vscode.workspace.getConfiguration("pythonLiveEvaluator");
     const debug = config.get("debug", true);
     const evaluationDelay = config.get("evaluationDelay", 0);
@@ -461,12 +465,42 @@ print(f"Total time: {threaded_time:.3f}s")
         if (result.success) {
           this.cumulativeCode.push(block.code);
 
+          const newVariables = {};
+          const changedVariables = {};
+
+          if (result.variables) {
+            for (const [key, value] of Object.entries(result.variables)) {
+              if (!previousVariables.hasOwnProperty(key)) {
+                newVariables[key] = value;
+              } else if (previousVariables[key] !== value) {
+                changedVariables[key] = value;
+              }
+            }
+          }
+
+          let blockOutput = null;
+          if (result.output) {
+            const fullOutput = result.output;
+            if (fullOutput.length > previousOutputLength) {
+              blockOutput = fullOutput.substring(previousOutputLength).trim();
+              previousOutputLength = fullOutput.length;
+            }
+          }
+
+          let blockPrintOutputs = [];
+          if (
+            result.print_outputs &&
+            result.print_outputs.length > previousPrintCount
+          ) {
+            blockPrintOutputs = result.print_outputs.slice(previousPrintCount);
+            previousPrintCount = result.print_outputs.length;
+          }
+
           if (evaluationMode === "explicit") {
             this.outputChannel.appendLine(
               `[DEBUG] EXPLICIT: Checking block ${i + 1} for marked lines...`
             );
 
-            let addedDecoration = false;
             for (
               let lineIdx = block.startLine;
               lineIdx <= block.endLine;
@@ -481,89 +515,34 @@ print(f"Total time: {threaded_time:.3f}s")
                 const cleanLine = lineContent.split("#")[0].trim();
                 let decorationText = "";
 
-                const isExpression =
-                  cleanLine &&
-                  !cleanLine.includes("=") &&
-                  !cleanLine.startsWith("def ") &&
-                  !cleanLine.startsWith("class ") &&
-                  !cleanLine.startsWith("import ") &&
-                  !cleanLine.startsWith("from ") &&
-                  !cleanLine.startsWith("print");
+                const hasPrint = cleanLine.includes("print");
 
-                if (isExpression) {
-                  if (result.variables && result.variables[cleanLine]) {
-                    decorationText = ` → ${result.variables[cleanLine]}`;
-                  } else if (result.expression && lineIdx === block.endLine) {
-                    decorationText = ` → ${result.expression}`;
-                  } else {
-                    if (
-                      result.variables &&
-                      Object.keys(result.variables).length > 0
-                    ) {
-                      const varDisplay = Object.entries(result.variables)
-                        .slice(-3)
-                        .map(([k, v]) => {
-                          const val =
-                            v.length > 30 ? v.substring(0, 27) + "..." : v;
-                          return `${k}: ${val}`;
-                        })
-                        .join(", ");
-                      decorationText = ` // ${varDisplay}`;
-                    }
+                if (hasPrint && blockPrintOutputs.length > 0) {
+                  decorationText = ` ▶ ${
+                    blockPrintOutputs[blockPrintOutputs.length - 1].text
+                  }`;
+                } else if (cleanLine.includes("=")) {
+                  const varName = cleanLine.split("=")[0].trim();
+                  if (result.variables && result.variables[varName]) {
+                    decorationText = ` // ${varName}: ${result.variables[varName]}`;
                   }
-                } else if (cleanLine.includes("print")) {
-                  if (result.output) {
-                    const lines = result.output.split("\n");
-                    decorationText = ` ▶ ${
-                      result.print_outputs[lines.length - 1].text
-                    }`;
-                    this.outputChannel.appendLine(
-                      `[DEBUG] Print output for line ${lineIdx}: "${
-                        result.print_outputs[lines.length - 1].text
-                      }"`
-                    );
-                  } else if (
-                    result.print_outputs &&
-                    result.print_outputs.length > 0
-                  ) {
-                    const lastPrint =
-                      result.print_outputs[result.print_outputs.length - 1];
-                    decorationText = ` ▶ ${lastPrint.text}`;
-                    this.outputChannel.appendLine(
-                      `[DEBUG] Using print_outputs for line ${lineIdx}: "${lastPrint.text}"`
-                    );
-                  }
-                } else {
-                  if (
-                    result.variables &&
-                    Object.keys(result.variables).length > 0
-                  ) {
-                    if (cleanLine.includes("=")) {
-                      const varName = cleanLine.split("=")[0].trim();
-                      if (result.variables[varName]) {
-                        decorationText = ` // ${varName}: ${result.variables[varName]}`;
-                      } else {
-                        const varDisplay = Object.entries(result.variables)
-                          .slice(-3)
-                          .map(([k, v]) => {
-                            const val =
-                              v.length > 30 ? v.substring(0, 27) + "..." : v;
-                            return `${k}: ${val}`;
-                          })
-                          .join(", ");
-                        decorationText = ` // ${varDisplay}`;
-                      }
-                    } else {
-                      const varDisplay = Object.entries(result.variables)
-                        .slice(-3)
-                        .map(([k, v]) => {
-                          const val =
-                            v.length > 30 ? v.substring(0, 27) + "..." : v;
-                          return `${k}: ${val}`;
-                        })
-                        .join(", ");
-                      decorationText = ` // ${varDisplay}`;
-                    }
+                } else if (result.expression && lineIdx === block.endLine) {
+                  decorationText = ` → ${result.expression}`;
+                } else if (
+                  Object.keys(newVariables).length > 0 ||
+                  Object.keys(changedVariables).length > 0
+                ) {
+                  const varsToShow = { ...newVariables, ...changedVariables };
+                  const varDisplay = Object.entries(varsToShow)
+                    .slice(0, 3)
+                    .map(([k, v]) => {
+                      const val =
+                        v.length > 30 ? v.substring(0, 27) + "..." : v;
+                      return `${k}: ${val}`;
+                    })
+                    .join(", ");
+                  if (varDisplay) {
+                    decorationText = ` // ${varDisplay}`;
                   }
                 }
 
@@ -577,32 +556,23 @@ print(f"Total time: {threaded_time:.3f}s")
                       },
                     },
                   });
-                  addedDecoration = true;
                   this.outputChannel.appendLine(
                     `[DEBUG] EXPLICIT: Added decoration: "${decorationText}"`
-                  );
-                } else {
-                  this.outputChannel.appendLine(
-                    `[DEBUG] EXPLICIT: No decoration text generated for line ${lineIdx}`
                   );
                 }
               }
             }
-
-            if (!addedDecoration) {
-              this.outputChannel.appendLine(
-                `[DEBUG] EXPLICIT: No marked lines in this block - NO DECORATION ADDED`
-              );
-            }
           } else if (evaluationMode === "auto") {
             this.outputChannel.appendLine(
-              `[DEBUG] AUTO: Adding decoration to line ${block.endLine}`
+              `[DEBUG] AUTO: Adding incremental decoration to line ${block.endLine}`
             );
 
             const decorationLine = block.endLine;
+            let decorationAdded = false;
 
-            if (result.variables && Object.keys(result.variables).length > 0) {
-              const varDisplay = Object.entries(result.variables)
+            const allChanges = { ...newVariables, ...changedVariables };
+            if (Object.keys(allChanges).length > 0) {
+              const varDisplay = Object.entries(allChanges)
                 .slice(-5)
                 .map(([k, v]) => {
                   const val = v.length > 50 ? v.substring(0, 47) + "..." : v;
@@ -624,26 +594,46 @@ print(f"Total time: {threaded_time:.3f}s")
                   },
                 },
               });
+              decorationAdded = true;
+              this.outputChannel.appendLine(
+                `[DEBUG] AUTO: Added variables: ${varDisplay}`
+              );
             }
 
             if (result.expression) {
-              decorations.push({
-                range: new vscode.Range(
-                  decorationLine,
-                  1000,
-                  decorationLine,
-                  1000
-                ),
-                renderOptions: {
-                  after: {
-                    contentText: ` → ${result.expression}`,
-                    color: "#4fc3f7",
+              const lastLine = lines[block.endLine].trim();
+              const isSimpleExpression =
+                lastLine &&
+                !lastLine.includes("=") &&
+                !lastLine.startsWith("print") &&
+                !lastLine.startsWith("def ") &&
+                !lastLine.startsWith("class ") &&
+                !lastLine.startsWith("import ") &&
+                !lastLine.startsWith("from ");
+
+              if (isSimpleExpression) {
+                decorations.push({
+                  range: new vscode.Range(
+                    decorationLine,
+                    1000,
+                    decorationLine,
+                    1000
+                  ),
+                  renderOptions: {
+                    after: {
+                      contentText: ` → ${result.expression}`,
+                      color: "#4fc3f7",
+                    },
                   },
-                },
-              });
+                });
+                decorationAdded = true;
+                this.outputChannel.appendLine(
+                  `[DEBUG] AUTO: Added expression: ${result.expression}`
+                );
+              }
             }
 
-            if (result.output) {
+            if (blockOutput) {
               decorations.push({
                 range: new vscode.Range(
                   decorationLine,
@@ -653,17 +643,25 @@ print(f"Total time: {threaded_time:.3f}s")
                 ),
                 renderOptions: {
                   after: {
-                    contentText: ` ▶ ${result.output}`,
+                    contentText: ` ▶ ${blockOutput}`,
                     color: "#4fc3f7",
                   },
                 },
               });
+              decorationAdded = true;
+              this.outputChannel.appendLine(
+                `[DEBUG] AUTO: Added output: ${blockOutput}`
+              );
             }
-          } else {
-            this.outputChannel.appendLine(
-              `[DEBUG] Unknown mode: ${evaluationMode}`
-            );
+
+            if (!decorationAdded) {
+              this.outputChannel.appendLine(
+                `[DEBUG] AUTO: No changes to display for this block`
+              );
+            }
           }
+
+          previousVariables = { ...result.variables };
         } else if (result.error) {
           this.outputChannel.appendLine(
             `[DEBUG] Error in block: ${result.error}`
@@ -676,9 +674,6 @@ print(f"Total time: {threaded_time:.3f}s")
               lineIdx++
             ) {
               if (markedLines.has(lineIdx)) {
-                this.outputChannel.appendLine(
-                  `[DEBUG] EXPLICIT: Adding error to marked line ${lineIdx}`
-                );
                 errorDecorations.push({
                   range: new vscode.Range(lineIdx, 1000, lineIdx, 1000),
                   renderOptions: {
@@ -700,6 +695,10 @@ print(f"Total time: {threaded_time:.3f}s")
               },
             });
           }
+
+          previousVariables = {};
+          previousOutputLength = 0;
+          previousPrintCount = 0;
         }
       }
     } finally {
