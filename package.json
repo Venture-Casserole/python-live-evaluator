@@ -1,0 +1,180 @@
+{
+  "name": "python-live-evaluator",
+  "displayName": "Python Live Evaluator",
+  "description": "Live Python evaluation with free-threaded Python support",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers",
+    "Other"
+  ],
+  "keywords": [
+    "python",
+    "live",
+    "evaluation",
+    "repl",
+    "inline",
+    "gil",
+    "threading",
+    "free-threaded",
+    "api",
+    "rate-limit"
+  ],
+  "activationEvents": [
+    "onLanguage:python"
+  ],
+  "main": "./extension.js",
+  "extensionDependencies": [
+    "ms-python.python"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "pythonLiveEvaluator.start",
+        "title": "Python Live: Start Evaluation",
+        "icon": "$(play)"
+      },
+      {
+        "command": "pythonLiveEvaluator.stop",
+        "title": "Python Live: Stop Evaluation",
+        "icon": "$(stop)"
+      },
+      {
+        "command": "pythonLiveEvaluator.clear",
+        "title": "Python Live: Clear Results",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "pythonLiveEvaluator.showGilStatus",
+        "title": "Python Live: Show GIL Status",
+        "icon": "$(info)"
+      },
+      {
+        "command": "pythonLiveEvaluator.runThreadingDemo",
+        "title": "Python Live: Insert Threading Demo",
+        "icon": "$(play-circle)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "pythonLiveEvaluator.start",
+        "key": "ctrl+shift+p ctrl+shift+s",
+        "when": "editorTextFocus && resourceExtname == .py"
+      },
+      {
+        "command": "pythonLiveEvaluator.stop",
+        "key": "ctrl+shift+p ctrl+shift+x",
+        "when": "editorTextFocus && resourceExtname == .py"
+      },
+      {
+        "command": "pythonLiveEvaluator.showGilStatus",
+        "key": "ctrl+shift+p ctrl+shift+g",
+        "when": "editorTextFocus && resourceExtname == .py"
+      }
+    ],
+    "configuration": {
+      "title": "Python Live Evaluator",
+      "properties": {
+        "pythonLiveEvaluator.evaluationMode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "explicit"
+          ],
+          "default": "explicit",
+          "description": "Evaluation mode for displaying results (DEFAULT: explicit)",
+          "enumDescriptions": [
+            "Auto: Show evaluation results on all lines",
+            "Explicit: Only show results on lines with evaluation markers (e.g., '# ?') - DEFAULT"
+          ],
+          "markdownDescription": "Choose when to display evaluation results:\n- **Auto**: Show results for all evaluated code\n- **Explicit**: Only show results on lines marked with special comments (DEFAULT)\n\nIn explicit mode, add markers like `# ?` or `# /` to see results on specific lines."
+        },
+        "pythonLiveEvaluator.evaluationMarkers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "# ?",
+            "# /"
+          ],
+          "description": "Comment markers that trigger evaluation display in explicit mode",
+          "markdownDescription": "Comment markers used in **explicit mode** to show evaluation results.\n\n**Examples:**\n```python\nx = 10        # No output\ny = 20        # No output\nz = x + y     # ?  Shows: // z: 30\nprint(z)      # /  Shows: ▶ 30\n```\n\nYou can customize these markers, e.g., `[\"# ?\", \"# !\", \"# show\"]`"
+        },
+        "pythonLiveEvaluator.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start evaluation for Python files"
+        },
+        "pythonLiveEvaluator.debounceDelay": {
+          "type": "number",
+          "default": 300,
+          "description": "Delay in ms before evaluating after typing stops",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "pythonLiveEvaluator.evaluationDelay": {
+          "type": "number",
+          "default": 0,
+          "description": "Delay in ms between evaluating each code block (useful for rate-limited APIs)",
+          "minimum": 0,
+          "maximum": 10000,
+          "markdownDescription": "Delay between evaluating each code block in milliseconds. Useful when working with rate-limited APIs:\n- `0`: No delay (default)\n- `100-500`: Light rate limiting\n- `1000-2000`: Moderate rate limiting (1-2 requests/second)\n- `3000+`: Heavy rate limiting"
+        },
+        "pythonLiveEvaluator.showWaitingIndicator": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a waiting indicator when evaluation delay is >= 1000ms"
+        },
+        "pythonLiveEvaluator.maxOutputLength": {
+          "type": "number",
+          "default": 200,
+          "description": "Maximum length of inline output display",
+          "minimum": 50,
+          "maximum": 1000
+        },
+        "pythonLiveEvaluator.showThreadingMetrics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show special decorations for threading and performance metrics"
+        },
+        "pythonLiveEvaluator.debug": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable debug output in the Output panel (DEFAULT: true for testing)"
+        }
+      }
+    },
+    "menus": {
+      "editor/title": [
+        {
+          "command": "pythonLiveEvaluator.start",
+          "when": "resourceExtname == .py",
+          "group": "navigation"
+        },
+        {
+          "command": "pythonLiveEvaluator.showGilStatus",
+          "when": "resourceExtname == .py",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "test": "echo \"No tests configured\""
+  },
+  "devDependencies": {
+    "@types/node": "24.3.0",
+    "@types/vscode": "^1.74.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Venture-Casserole/python-live-evaluator"
+  },
+  "icon": "images/vc.png",
+  "publisher": "VentureCasserole",
+  "license": "MIT"
+}
