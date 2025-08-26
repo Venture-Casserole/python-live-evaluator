@@ -1,11 +1,12 @@
 # Python Live Evaluator
 
-A VSCode extension that provides live evaluation for Python with advanced features including explicit evaluation mode, rate limiting for APIs, and free-threaded Python support.
+A VSCode extension that provides live evaluation for Python with advanced features including explicit evaluation mode, syntax validation, rate limiting for APIs, and free-threaded Python support.
 
 ## ✨ Features
 
 - 🚀 **Live Evaluation** - See Python code results as you type, inline with your code
 - 🎯 **Explicit Mode** - Control exactly where results appear with comment markers
+- ✅ **Syntax Validation** - Visual gutter indicators show code validity before evaluation
 - ⏱️ **Rate Limiting** - Protect API quotas with configurable evaluation delays
 - 🧵 **Free-threaded Python Support** - Full support for Python 3.13+ no-GIL builds
 - 🔍 **Smart Block Detection** - Correctly handles functions, classes, loops, and indentation
@@ -40,7 +41,8 @@ npm install
 
 1. **Open any Python file** - The extension activates automatically
 2. **Start typing** - See results appear inline as you code
-3. **Use markers in explicit mode** - Add `# ?` to any line to see its result
+3. **Watch the gutter** - Colored dots show code validation status
+4. **Use markers in explicit mode** - Add `# ?` to any line to see its result
 
 ### Basic Example
 
@@ -62,6 +64,7 @@ All settings are prefixed with `pythonLiveEvaluator.` in your VSCode settings.
 | ----------------------- | ---------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------- |
 | **`evaluationMode`**    | `"auto" \| "explicit"` | `"explicit"`     | **Evaluation display mode**<br>• `auto`: Show results on all lines<br>• `explicit`: Only show on marked lines |
 | **`evaluationMarkers`** | `string[]`             | `["# ?", "# /"]` | Comment markers that trigger display in explicit mode                                                         |
+| **`syntaxValidation`**  | `boolean`              | `true`           | Enable syntax validation with gutter indicators (prevents indent errors)                                      |
 | **`autoStart`**         | `boolean`              | `true`           | Automatically start evaluation when opening Python files                                                      |
 | **`debug`**             | `boolean`              | `false`          | Enable detailed debug output in the Output panel                                                              |
 
@@ -79,6 +82,48 @@ All settings are prefixed with `pythonLiveEvaluator.` in your VSCode settings.
 | -------------------------- | --------- | ------- | ------- | ---------------------------------------------------------- |
 | **`maxOutputLength`**      | `number`  | `200`   | 50-1000 | Maximum characters for inline output display               |
 | **`showThreadingMetrics`** | `boolean` | `true`  | -       | Show special decorations for threading/performance metrics |
+
+## ✅ Syntax Validation
+
+The extension provides real-time syntax validation to prevent evaluation errors while typing.
+
+### Gutter Indicators
+
+| Indicator | Meaning    | Description                                          |
+| --------- | ---------- | ---------------------------------------------------- |
+| 🟢        | Valid      | Code is syntactically correct and has been evaluated |
+| 🔴        | Invalid    | Syntax error detected - see inline error message     |
+| 🟠        | Incomplete | Incomplete block (e.g., `for` loop without body)     |
+
+### How It Works
+
+When enabled (default), the extension:
+
+1. Validates syntax before evaluation using Python's AST parser
+2. Shows gutter dots indicating block status
+3. Only evaluates valid, complete blocks
+4. Prevents indentation errors while typing
+
+### Configuration
+
+```json
+{
+  "pythonLiveEvaluator.syntaxValidation": true // or false to disable
+}
+```
+
+When **disabled**, all blocks are evaluated immediately (may cause errors while typing).
+
+### Example
+
+```python
+# While typing:
+for i in range(5):    # 🟠 Shows: ⏳ waiting for block completion...
+
+# After completing:
+for i in range(5):    # 🟢
+    print(i)  # ?     # Shows: ▶ 0, 1, 2, 3, 4
+```
 
 ## 🎯 Evaluation Modes
 
@@ -190,6 +235,8 @@ Access via Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 
 ## 🎨 Visual Indicators
 
+### Inline Decorations
+
 | Indicator       | Meaning            | Example                  |
 | --------------- | ------------------ | ------------------------ |
 | `// var: value` | Variable values    | `// x: 10, y: 20`        |
@@ -199,6 +246,14 @@ Access via Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 | `🧵 threads`    | Threading info     | `🧵 Active threads: 5`   |
 | `⚡ metric`     | Performance metric | `⚡ Time: 0.5s`          |
 | `⏳ waiting`    | Evaluation delay   | `⏳ waiting 1000ms...`   |
+
+### Gutter Indicators (Syntax Validation)
+
+| Dot | Status     | Description                                      |
+| --- | ---------- | ------------------------------------------------ |
+| 🟢  | Valid      | Code block is syntactically correct              |
+| 🔴  | Invalid    | Syntax error in block                            |
+| 🟠  | Incomplete | Block needs completion (e.g., loop without body) |
 
 ## 🐛 Debug Mode
 
@@ -215,6 +270,7 @@ View output: `View → Output → Select "Python Live Evaluator"`
 Debug output shows:
 
 - Evaluation mode and settings
+- Syntax validation results
 - Marked line detection (explicit mode)
 - Block parsing details
 - Decoration decisions
@@ -228,7 +284,8 @@ Debug output shows:
 ```json
 {
   "pythonLiveEvaluator.evaluationMode": "explicit",
-  "pythonLiveEvaluator.evaluationDelay": 1000
+  "pythonLiveEvaluator.evaluationDelay": 1000,
+  "pythonLiveEvaluator.syntaxValidation": true
 }
 ```
 
@@ -261,7 +318,8 @@ factorial(10)  # ?  → 3628800
 
 ```json
 {
-  "pythonLiveEvaluator.evaluationMode": "auto"
+  "pythonLiveEvaluator.evaluationMode": "auto",
+  "pythonLiveEvaluator.syntaxValidation": true
 }
 ```
 
@@ -281,12 +339,20 @@ df.describe()  # → <statistics>
 2. In explicit mode, ensure you have markers (`# ?`)
 3. Check Output panel for errors
 4. Verify Python interpreter is selected
+5. Check gutter indicators - red dots indicate syntax errors
 
 ### Decorations on wrong lines
 
 1. Enable debug mode to see block parsing
 2. Check indentation is consistent
 3. Ensure markers are properly formatted
+4. Look for orange gutter dots (incomplete blocks)
+
+### Indentation errors while typing
+
+1. Ensure `syntaxValidation` is enabled (default)
+2. Wait for orange dot to turn green before expecting results
+3. Complete code blocks before evaluation occurs
 
 ### Performance issues
 
@@ -294,6 +360,7 @@ df.describe()  # → <statistics>
 2. Add `evaluationDelay` for API calls
 3. Use explicit mode to reduce decorations
 4. Check for infinite loops in code
+5. Consider disabling `syntaxValidation` if validation is slow
 
 ### API rate limits
 
@@ -335,10 +402,12 @@ MIT License - See LICENSE file for details
 ## 🌟 Tips
 
 1. **Start with explicit mode** for cleaner display
-2. **Use rate limiting** when working with APIs
-3. **Enable debug mode** when troubleshooting
-4. **Customize markers** to match your workflow
-5. **Check GIL status** for threading performance
+2. **Keep syntax validation enabled** to avoid errors while typing
+3. **Use rate limiting** when working with APIs
+4. **Enable debug mode** when troubleshooting
+5. **Customize markers** to match your workflow
+6. **Check GIL status** for threading performance
+7. **Watch the gutter dots** for immediate syntax feedback
 
 ---
 

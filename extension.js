@@ -20,6 +20,32 @@ class PythonLiveEvaluator {
       backgroundColor: "rgba(255, 0, 0, 0.1)",
     });
 
+    this.validGutterDecoration = vscode.window.createTextEditorDecorationType({
+      gutterIconPath: this.createStatusIcon("#4caf50"),
+      gutterIconSize: "75%",
+    });
+
+    this.invalidGutterDecoration = vscode.window.createTextEditorDecorationType(
+      {
+        gutterIconPath: this.createStatusIcon("#f44336"),
+        gutterIconSize: "75%",
+        backgroundColor: "rgba(244, 67, 54, 0.1)",
+      }
+    );
+
+    this.incompleteGutterDecoration =
+      vscode.window.createTextEditorDecorationType({
+        gutterIconPath: this.createStatusIcon("#ff9800"),
+        gutterIconSize: "75%",
+      });
+
+    this.waitingGutterDecoration = vscode.window.createTextEditorDecorationType(
+      {
+        gutterIconPath: this.createStatusIcon("#9e9e9e"),
+        gutterIconSize: "75%",
+      }
+    );
+
     this.threadingDecorationType = vscode.window.createTextEditorDecorationType(
       {
         after: {
@@ -59,6 +85,16 @@ class PythonLiveEvaluator {
     this.isFreethreaded = false;
     this.cumulativeCode = [];
     this.isEvaluating = false;
+    this.blockValidationCache = new Map();
+  }
+
+  createStatusIcon(color) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+      <circle cx="8" cy="8" r="7" fill="${color}"/>
+    </svg>`;
+    return vscode.Uri.parse(
+      `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
+    );
   }
 
   async activate(context) {
@@ -73,6 +109,7 @@ class PythonLiveEvaluator {
       await pythonExt.activate();
     }
     this.pythonApi = pythonExt.exports;
+
     let startCommand = vscode.commands.registerCommand(
       "pythonLiveEvaluator.start",
       () => {
@@ -92,6 +129,7 @@ class PythonLiveEvaluator {
       () => {
         this.clearDecorations();
         this.cumulativeCode = [];
+        this.blockValidationCache.clear();
       }
     );
 
@@ -149,7 +187,6 @@ class PythonLiveEvaluator {
       this.outputChannel.appendLine(
         `Using Python interpreter: ${this.pythonPath}`
       );
-
       await this.checkFreethreadedPython();
     } else {
       this.pythonPath = "python";
@@ -260,9 +297,15 @@ print(f"Total time: {threaded_time:.3f}s")
 
     const config = vscode.workspace.getConfiguration("pythonLiveEvaluator");
     const evaluationMode = config.get("evaluationMode", "auto");
+    const syntaxValidation = config.get("syntaxValidation", true);
+
     this.outputChannel.appendLine(`Evaluation mode: ${evaluationMode}`);
+    this.outputChannel.appendLine(
+      `Syntax validation: ${syntaxValidation ? "enabled" : "disabled"}`
+    );
 
     this.cumulativeCode = [];
+    this.blockValidationCache.clear();
 
     this.clearDecorations();
 
@@ -278,9 +321,11 @@ print(f"Total time: {threaded_time:.3f}s")
     this.configListener = vscode.workspace.onDidChangeConfiguration((event) => {
       if (
         event.affectsConfiguration("pythonLiveEvaluator.evaluationMode") ||
-        event.affectsConfiguration("pythonLiveEvaluator.evaluationMarkers")
+        event.affectsConfiguration("pythonLiveEvaluator.evaluationMarkers") ||
+        event.affectsConfiguration("pythonLiveEvaluator.syntaxValidation")
       ) {
         this.clearDecorations();
+        this.blockValidationCache.clear();
 
         if (vscode.window.activeTextEditor?.document.languageId === "python") {
           this.evaluateDocument(vscode.window.activeTextEditor.document);
@@ -309,6 +354,7 @@ print(f"Total time: {threaded_time:.3f}s")
     }
     this.clearDecorations();
     this.cumulativeCode = [];
+    this.blockValidationCache.clear();
     vscode.window.showInformationMessage("Python Live Evaluator stopped");
   }
 
@@ -320,9 +366,86 @@ print(f"Total time: {threaded_time:.3f}s")
     const delay = vscode.workspace
       .getConfiguration("pythonLiveEvaluator")
       .get("debounceDelay", 300);
+
     this.debounceTimer = setTimeout(() => {
       this.evaluateDocument(document);
     }, delay);
+  }
+
+  async validatePythonSyntax(code) {
+    return new Promise((resolve) => {
+      const validationCode = `
+import ast
+import sys
+import json
+
+result = {
+    'valid': False,
+    'incomplete': False,
+    'error': None,
+    'error_line': None
+}
+
+code = ${JSON.stringify(code)}
+
+try:
+    ast.parse(code)
+    result['valid'] = True
+except SyntaxError as e:
+    error_msg = str(e)
+    result['error'] = error_msg
+
+    if 'unexpected EOF' in error_msg or 'expected an indented block' in error_msg:
+        result['incomplete'] = True
+
+        lines = code.strip().split('\\n')
+        last_line = lines[-1].strip()
+        if last_line.endswith(':'):
+            result['incomplete'] = True
+
+    if hasattr(e, 'lineno'):
+        result['error_line'] = e.lineno
+
+print(json.dumps(result))
+`;
+
+      const python = spawn(this.pythonPath || "python", ["-c", validationCode]);
+      let output = "";
+
+      python.stdout.on("data", (data) => {
+        output += data.toString();
+      });
+
+      python.on("close", () => {
+        try {
+          const result = JSON.parse(output.trim());
+          resolve(result);
+        } catch (e) {
+          resolve({
+            valid: false,
+            incomplete: false,
+            error: "Failed to validate syntax",
+          });
+        }
+      });
+
+      python.on("error", () => {
+        resolve({
+          valid: false,
+          incomplete: false,
+          error: "Python process error",
+        });
+      });
+
+      setTimeout(() => {
+        python.kill();
+        resolve({
+          valid: false,
+          incomplete: false,
+          error: "Validation timeout",
+        });
+      }, 1000);
+    });
   }
 
   async evaluateDocument(document) {
@@ -351,6 +474,11 @@ print(f"Total time: {threaded_time:.3f}s")
     const threadingDecorations = [];
     const performanceDecorations = [];
 
+    const validGutterDecorations = [];
+    const invalidGutterDecorations = [];
+    const incompleteGutterDecorations = [];
+    const waitingGutterDecorations = [];
+
     this.cumulativeCode = [];
 
     let previousVariables = {};
@@ -363,47 +491,32 @@ print(f"Total time: {threaded_time:.3f}s")
     const showWaitingIndicator = config.get("showWaitingIndicator", true);
     const evaluationMode = String(config.get("evaluationMode", "explicit"));
     const evaluationMarkers = config.get("evaluationMarkers", ["# ?", "# /"]);
+    const syntaxValidation = config.get("syntaxValidation", true);
 
     this.outputChannel.appendLine("========================================");
-    this.outputChannel.appendLine("[DEBUG] Starting evaluation");
+    this.outputChannel.appendLine(
+      `[DEBUG] Starting evaluation ${
+        syntaxValidation ? "with syntax validation" : "without validation"
+      }`
+    );
     this.outputChannel.appendLine(`[DEBUG] Mode: ${evaluationMode}`);
     this.outputChannel.appendLine(
-      `[DEBUG] Markers: ${evaluationMarkers.join(", ")}`
+      `[DEBUG] Syntax validation: ${syntaxValidation}`
     );
     this.outputChannel.appendLine(`[DEBUG] Total lines: ${lines.length}`);
 
     const markedLines = new Set();
 
     if (evaluationMode === "explicit") {
-      this.outputChannel.appendLine(
-        "[DEBUG] EXPLICIT MODE - Looking for markers..."
-      );
-
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        let foundMarker = null;
-
         for (const marker of evaluationMarkers) {
           if (line.includes(marker)) {
-            foundMarker = marker;
             markedLines.add(i);
             break;
           }
         }
-
-        if (foundMarker) {
-          this.outputChannel.appendLine(
-            `[DEBUG] Line ${i} has marker "${foundMarker}": ${line.substring(
-              0,
-              50
-            )}`
-          );
-        }
       }
-
-      this.outputChannel.appendLine(
-        `[DEBUG] Total marked lines: ${markedLines.size}`
-      );
 
       if (markedLines.size === 0) {
         this.outputChannel.appendLine(
@@ -412,14 +525,97 @@ print(f"Total time: {threaded_time:.3f}s")
         this.isEvaluating = false;
         return;
       }
-    } else {
-      this.outputChannel.appendLine(
-        "[DEBUG] AUTO MODE - Will show all decorations"
-      );
     }
 
     const blocks = this.parseIntoBlocks(lines);
     this.outputChannel.appendLine(`[DEBUG] Parsed ${blocks.length} blocks`);
+
+    const blockValidations = [];
+
+    if (syntaxValidation) {
+      for (let i = 0; i < blocks.length; i++) {
+        const block = blocks[i];
+        if (!block.code.trim()) {
+          blockValidations.push({ valid: true, incomplete: false });
+          continue;
+        }
+
+        const cumulativeCodeSoFar = [...this.cumulativeCode, block.code].join(
+          "\n"
+        );
+        const validation = await this.validatePythonSyntax(cumulativeCodeSoFar);
+        blockValidations.push(validation);
+
+        this.outputChannel.appendLine(
+          `[DEBUG] Block ${i + 1} validation: valid=${
+            validation.valid
+          }, incomplete=${validation.incomplete}`
+        );
+
+        const blockRange = new vscode.Range(
+          block.startLine,
+          0,
+          block.endLine,
+          0
+        );
+
+        if (validation.valid) {
+          validGutterDecorations.push(blockRange);
+          this.cumulativeCode.push(block.code);
+        } else if (validation.incomplete) {
+          incompleteGutterDecorations.push(blockRange);
+
+          decorations.push({
+            range: new vscode.Range(block.endLine, 1000, block.endLine, 1000),
+            renderOptions: {
+              after: {
+                contentText: ` ⏳ waiting for block completion...`,
+                color: "#ff9800",
+              },
+            },
+          });
+        } else {
+          invalidGutterDecorations.push(blockRange);
+
+          errorDecorations.push({
+            range: new vscode.Range(block.endLine, 1000, block.endLine, 1000),
+            renderOptions: {
+              after: {
+                contentText: ` ⚠ Syntax Error: ${validation.error}`,
+              },
+            },
+          });
+        }
+      }
+
+      editor.setDecorations(this.validGutterDecoration, validGutterDecorations);
+      editor.setDecorations(
+        this.invalidGutterDecoration,
+        invalidGutterDecorations
+      );
+      editor.setDecorations(
+        this.incompleteGutterDecoration,
+        incompleteGutterDecorations
+      );
+      editor.setDecorations(
+        this.waitingGutterDecoration,
+        waitingGutterDecorations
+      );
+    } else {
+      this.outputChannel.appendLine(
+        "[DEBUG] Syntax validation disabled - treating all blocks as valid"
+      );
+      for (let i = 0; i < blocks.length; i++) {
+        blockValidations.push({ valid: true, incomplete: false });
+      }
+
+      editor.setDecorations(this.validGutterDecoration, []);
+      editor.setDecorations(this.invalidGutterDecoration, []);
+      editor.setDecorations(this.incompleteGutterDecoration, []);
+      editor.setDecorations(this.waitingGutterDecoration, []);
+    }
+
+    this.cumulativeCode = [];
 
     let statusBarItem = null;
     if (evaluationDelay > 0 && blocks.length > 0) {
@@ -434,11 +630,23 @@ print(f"Total time: {threaded_time:.3f}s")
     try {
       for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
+        const validation = blockValidations[i];
 
         if (!block.code.trim()) continue;
 
+        if (syntaxValidation && (!validation.valid || validation.incomplete)) {
+          this.outputChannel.appendLine(
+            `[DEBUG] Skipping block ${i + 1}: ${
+              validation.incomplete ? "incomplete" : "invalid"
+            }`
+          );
+          continue;
+        }
+
         this.outputChannel.appendLine(
-          `[DEBUG] Block ${i + 1}: lines ${block.startLine}-${block.endLine}`
+          `[DEBUG] Evaluating block ${i + 1}: lines ${block.startLine}-${
+            block.endLine
+          }`
         );
 
         if (statusBarItem) {
@@ -497,20 +705,12 @@ print(f"Total time: {threaded_time:.3f}s")
           }
 
           if (evaluationMode === "explicit") {
-            this.outputChannel.appendLine(
-              `[DEBUG] EXPLICIT: Checking block ${i + 1} for marked lines...`
-            );
-
             for (
               let lineIdx = block.startLine;
               lineIdx <= block.endLine;
               lineIdx++
             ) {
               if (markedLines.has(lineIdx)) {
-                this.outputChannel.appendLine(
-                  `[DEBUG] EXPLICIT: Adding decoration to marked line ${lineIdx}`
-                );
-
                 const lineContent = lines[lineIdx].trim();
                 const cleanLine = lineContent.split("#")[0].trim();
                 let decorationText = "";
@@ -556,19 +756,11 @@ print(f"Total time: {threaded_time:.3f}s")
                       },
                     },
                   });
-                  this.outputChannel.appendLine(
-                    `[DEBUG] EXPLICIT: Added decoration: "${decorationText}"`
-                  );
                 }
               }
             }
           } else if (evaluationMode === "auto") {
-            this.outputChannel.appendLine(
-              `[DEBUG] AUTO: Adding incremental decoration to line ${block.endLine}`
-            );
-
             const decorationLine = block.endLine;
-            let decorationAdded = false;
 
             const allChanges = { ...newVariables, ...changedVariables };
             if (Object.keys(allChanges).length > 0) {
@@ -594,10 +786,6 @@ print(f"Total time: {threaded_time:.3f}s")
                   },
                 },
               });
-              decorationAdded = true;
-              this.outputChannel.appendLine(
-                `[DEBUG] AUTO: Added variables: ${varDisplay}`
-              );
             }
 
             if (result.expression) {
@@ -626,10 +814,6 @@ print(f"Total time: {threaded_time:.3f}s")
                     },
                   },
                 });
-                decorationAdded = true;
-                this.outputChannel.appendLine(
-                  `[DEBUG] AUTO: Added expression: ${result.expression}`
-                );
               }
             }
 
@@ -648,23 +832,13 @@ print(f"Total time: {threaded_time:.3f}s")
                   },
                 },
               });
-              decorationAdded = true;
-              this.outputChannel.appendLine(
-                `[DEBUG] AUTO: Added output: ${blockOutput}`
-              );
-            }
-
-            if (!decorationAdded) {
-              this.outputChannel.appendLine(
-                `[DEBUG] AUTO: No changes to display for this block`
-              );
             }
           }
 
           previousVariables = { ...result.variables };
         } else if (result.error) {
           this.outputChannel.appendLine(
-            `[DEBUG] Error in block: ${result.error}`
+            `[DEBUG] Runtime error in block: ${result.error}`
           );
 
           if (evaluationMode === "explicit") {
@@ -837,18 +1011,6 @@ print(f"Total time: {threaded_time:.3f}s")
         code: currentBlock.join("\n"),
         startLine: blockStartLine,
         endLine: lines.length - 1,
-      });
-    }
-
-    const debug = config.get("debug", false);
-    if (debug) {
-      this.outputChannel.appendLine("[DEBUG] Block parsing results:");
-      blocks.forEach((block, idx) => {
-        this.outputChannel.appendLine(
-          `[DEBUG]   Block ${idx + 1}: lines ${block.startLine}-${
-            block.endLine
-          }, code: "${block.code.substring(0, 50)}..."`
-        );
       });
     }
 
@@ -1048,9 +1210,15 @@ print(json.dumps(result))
       editor.setDecorations(this.threadingDecorationType, []);
       editor.setDecorations(this.performanceDecorationType, []);
       editor.setDecorations(this.waitingDecorationType, []);
+
+      editor.setDecorations(this.validGutterDecoration, []);
+      editor.setDecorations(this.invalidGutterDecoration, []);
+      editor.setDecorations(this.incompleteGutterDecoration, []);
+      editor.setDecorations(this.waitingGutterDecoration, []);
     }
     this.evaluationResults.clear();
     this.cumulativeCode = [];
+    this.blockValidationCache.clear();
   }
 
   deactivate() {
