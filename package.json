@@ -2,7 +2,7 @@
   "name": "python-live-evaluator",
   "displayName": "Python Live Evaluator",
   "description": "Live Python evaluation with free-threaded Python support",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "engines": {
     "vscode": "^1.74.0"
   },
@@ -112,7 +112,7 @@
         },
         "pythonLiveEvaluator.autoStart": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Automatically start evaluation for Python files"
         },
         "pythonLiveEvaluator.debounceDelay": {
@@ -180,7 +180,7 @@
     "type": "git",
     "url": "https://github.com/Venture-Casserole/python-live-evaluator"
   },
-  "icon": "images/vc.png",
+  "icon": "images/python_live_eval_logo.png",
   "publisher": "VentureCasserole",
   "license": "MIT"
 }

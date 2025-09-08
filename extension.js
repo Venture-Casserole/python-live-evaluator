@@ -156,15 +156,55 @@ class PythonLiveEvaluator {
     );
     context.subscriptions.push(this.outputChannel);
 
-    if (vscode.window.activeTextEditor?.document.languageId === "python") {
+    const getAutoStartSetting = () => {
+      return vscode.workspace
+        .getConfiguration("pythonLiveEvaluator")
+        .get("autoStart", false);
+    };
+
+    if (
+      getAutoStartSetting() &&
+      vscode.window.activeTextEditor?.document.languageId === "python"
+    ) {
       this.startEvaluation();
     }
 
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       if (editor?.document.languageId === "python") {
-        this.startEvaluation();
+        if (getAutoStartSetting()) {
+          this.startEvaluation();
+        }
       } else {
         this.stopEvaluation();
+      }
+    });
+
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("pythonLiveEvaluator.autoStart")) {
+        const newAutoStart = getAutoStartSetting();
+
+        if (
+          newAutoStart &&
+          !this.changeListener &&
+          vscode.window.activeTextEditor?.document.languageId === "python"
+        ) {
+          this.startEvaluation();
+        } else if (!newAutoStart && this.changeListener) {
+          this.stopEvaluation();
+        }
+      }
+
+      if (
+        event.affectsConfiguration("pythonLiveEvaluator.evaluationMode") ||
+        event.affectsConfiguration("pythonLiveEvaluator.evaluationMarkers") ||
+        event.affectsConfiguration("pythonLiveEvaluator.syntaxValidation")
+      ) {
+        this.clearDecorations();
+        this.blockValidationCache.clear();
+
+        if (vscode.window.activeTextEditor?.document.languageId === "python") {
+          this.evaluateDocument(vscode.window.activeTextEditor.document);
+        }
       }
     });
 

@@ -65,7 +65,7 @@ All settings are prefixed with `pythonLiveEvaluator.` in your VSCode settings.
 | **`evaluationMode`**    | `"auto" \| "explicit"` | `"explicit"`     | **Evaluation display mode**<br>• `auto`: Show results on all lines<br>• `explicit`: Only show on marked lines |
 | **`evaluationMarkers`** | `string[]`             | `["# ?", "# /"]` | Comment markers that trigger display in explicit mode                                                         |
 | **`syntaxValidation`**  | `boolean`              | `true`           | Enable syntax validation with gutter indicators (prevents indent errors)                                      |
-| **`autoStart`**         | `boolean`              | `true`           | Automatically start evaluation when opening Python files                                                      |
+| **`autoStart`**         | `boolean`              | `false`          | Automatically start evaluation when opening Python files                                                      |
 | **`debug`**             | `boolean`              | `false`          | Enable detailed debug output in the Output panel                                                              |
 
 ### Performance Settings
