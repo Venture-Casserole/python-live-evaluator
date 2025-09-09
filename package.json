@@ -2,7 +2,7 @@
   "name": "python-live-evaluator",
   "displayName": "Python Live Evaluator",
   "description": "Live Python evaluation with free-threaded Python support",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "engines": {
     "vscode": "^1.74.0"
   },

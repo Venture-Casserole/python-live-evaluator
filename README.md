@@ -39,7 +39,7 @@ npm install
 
 ## 🚀 Quick Start
 
-1. **Open any Python file** - The extension activates automatically
+1. **Open any Python file** - The extension activates automatically if `autoStart` is set to `true`
 2. **Start typing** - See results appear inline as you code
 3. **Watch the gutter** - Colored dots show code validation status
 4. **Use markers in explicit mode** - Add `# ?` to any line to see its result
@@ -192,16 +192,6 @@ Protect your API quotas with evaluation delays:
   "pythonLiveEvaluator.showWaitingIndicator": true
 }
 ```
-
-### Recommended Delays by Service
-
-| API Service      | Recommended Delay | Notes              |
-| ---------------- | ----------------- | ------------------ |
-| OpenAI GPT       | 1000-2000ms       | Varies by tier     |
-| Anthropic Claude | 500-1000ms        | Moderate limits    |
-| Google Cloud     | 100-500ms         | Higher limits      |
-| Twitter/X API    | 3000-5000ms       | Very strict        |
-| Local/Database   | 0-100ms           | Prevent exhaustion |
 
 ## 🧵 Free-threaded Python Support
 
