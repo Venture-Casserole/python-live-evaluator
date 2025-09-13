@@ -948,6 +948,7 @@ print(json.dumps(result))
     let blockStartLine = 0;
     let inBlock = false;
     let baseIndent = 0;
+    let blockStack = [];
 
     const config = vscode.workspace.getConfiguration("pythonLiveEvaluator");
     const evaluationMode = String(config.get("evaluationMode", "explicit"));
@@ -955,6 +956,37 @@ print(json.dumps(result))
 
     const lineHasMarker = (line) => {
       return evaluationMarkers.some((marker) => line.includes(marker));
+    };
+
+    const startsNewBlock = (line, indent) => {
+      const trimmed = line.trim();
+
+      const topLevelBlockPatterns = [/^def\s+/, /^class\s+/, /^async\s+def\s+/];
+
+      const nestedBlockPatterns = [
+        /^if\s+/,
+        /^elif\s+/,
+        /^else\s*:/,
+        /^for\s+/,
+        /^while\s+/,
+        /^async\s+for\s+/,
+        /^with\s+/,
+        /^async\s+with\s+/,
+        /^try\s*:/,
+        /^except/,
+        /^finally\s*:/,
+        /^match\s+/,
+        /^case\s+/,
+      ];
+
+      const isTopLevel = topLevelBlockPatterns.some((pattern) =>
+        pattern.test(trimmed)
+      );
+      const isNested = nestedBlockPatterns.some((pattern) =>
+        pattern.test(trimmed)
+      );
+
+      return (isTopLevel || isNested) && trimmed.endsWith(":");
     };
 
     for (let i = 0; i < lines.length; i++) {
@@ -972,21 +1004,29 @@ print(json.dumps(result))
 
       const indent = line.length - line.trimStart().length;
 
-      const startsBlock =
-        trimmedLine.endsWith(":") &&
-        (trimmedLine.startsWith("def ") ||
-          trimmedLine.startsWith("class ") ||
-          trimmedLine.startsWith("if ") ||
-          trimmedLine.startsWith("elif ") ||
-          trimmedLine.startsWith("else") ||
-          trimmedLine.startsWith("for ") ||
-          trimmedLine.startsWith("while ") ||
-          trimmedLine.startsWith("with ") ||
-          trimmedLine.startsWith("try:") ||
-          trimmedLine.startsWith("except") ||
-          trimmedLine.startsWith("finally:"));
+      if (evaluationMode === "explicit" && lineHasMarker(line)) {
+        if (currentBlock.length > 0) {
+          blocks.push({
+            code: currentBlock.join("\n"),
+            startLine: blockStartLine,
+            endLine: i - 1,
+          });
+        }
+        blocks.push({
+          code: line,
+          startLine: i,
+          endLine: i,
+        });
+        currentBlock = [];
+        blockStartLine = i + 1;
+        continue;
+      }
 
-      if (startsBlock) {
+      const isNewTopLevelBlock =
+        startsNewBlock(line, indent) &&
+        (indent === 0 || !inBlock || indent <= baseIndent);
+
+      if (isNewTopLevelBlock) {
         if (currentBlock.length > 0) {
           blocks.push({
             code: currentBlock.join("\n"),
@@ -999,10 +1039,28 @@ print(json.dumps(result))
         blockStartLine = i;
         inBlock = true;
         baseIndent = indent;
+
+        blockStack = [
+          {
+            type: trimmedLine.startsWith("def")
+              ? "function"
+              : trimmedLine.startsWith("class")
+              ? "class"
+              : "block",
+            indent: indent,
+          },
+        ];
       } else if (inBlock) {
-        if (indent > baseIndent || !trimmedLine) {
+        if (indent > baseIndent) {
           currentBlock.push(line);
-        } else {
+
+          if (startsNewBlock(line, indent)) {
+            blockStack.push({
+              type: "nested",
+              indent: indent,
+            });
+          }
+        } else if (indent === baseIndent && startsNewBlock(line, indent)) {
           blocks.push({
             code: currentBlock.join("\n"),
             startLine: blockStartLine,
@@ -1011,10 +1069,44 @@ print(json.dumps(result))
 
           currentBlock = [line];
           blockStartLine = i;
-          inBlock = false;
+          baseIndent = indent;
+          blockStack = [
+            {
+              type: trimmedLine.startsWith("def")
+                ? "function"
+                : trimmedLine.startsWith("class")
+                ? "class"
+                : "block",
+              indent: indent,
+            },
+          ];
+        } else if (indent <= baseIndent) {
+          blocks.push({
+            code: currentBlock.join("\n"),
+            startLine: blockStartLine,
+            endLine: i - 1,
+          });
+
+          currentBlock = [line];
+          blockStartLine = i;
+          inBlock = startsNewBlock(line, indent);
+          if (inBlock) {
+            baseIndent = indent;
+            blockStack = [
+              {
+                type: "block",
+                indent: indent,
+              },
+            ];
+          } else {
+            inBlock = false;
+            blockStack = [];
+          }
+        } else {
+          currentBlock.push(line);
         }
       } else {
-        if (evaluationMode === "explicit" && lineHasMarker(line)) {
+        if (startsNewBlock(line, indent)) {
           if (currentBlock.length > 0) {
             blocks.push({
               code: currentBlock.join("\n"),
@@ -1022,26 +1114,32 @@ print(json.dumps(result))
               endLine: i - 1,
             });
           }
-          blocks.push({
-            code: line,
-            startLine: i,
-            endLine: i,
-          });
-          currentBlock = [];
-          blockStartLine = i + 1;
-        } else if (currentBlock.length > 0 && indent === 0) {
-          blocks.push({
-            code: currentBlock.join("\n"),
-            startLine: blockStartLine,
-            endLine: i - 1,
-          });
+
           currentBlock = [line];
           blockStartLine = i;
+          inBlock = true;
+          baseIndent = indent;
+          blockStack = [
+            {
+              type: "block",
+              indent: indent,
+            },
+          ];
         } else {
-          if (currentBlock.length === 0) {
+          if (currentBlock.length > 0 && indent === 0) {
+            blocks.push({
+              code: currentBlock.join("\n"),
+              startLine: blockStartLine,
+              endLine: i - 1,
+            });
+            currentBlock = [line];
             blockStartLine = i;
+          } else {
+            if (currentBlock.length === 0) {
+              blockStartLine = i;
+            }
+            currentBlock.push(line);
           }
-          currentBlock.push(line);
         }
       }
     }
