@@ -578,12 +578,15 @@ print(json.dumps(result))
         if (!block.code.trim()) {
           blockValidations.push({ valid: true, incomplete: false });
           continue;
+        } else {
         }
 
         const cumulativeCodeSoFar = [...this.cumulativeCode, block.code].join(
           "\n"
         );
+        console.log(cumulativeCodeSoFar);
         const validation = await this.validatePythonSyntax(cumulativeCodeSoFar);
+        console.log(validation);
         blockValidations.push(validation);
 
         this.outputChannel.appendLine(
@@ -603,6 +606,7 @@ print(json.dumps(result))
           validGutterDecorations.push(blockRange);
           this.cumulativeCode.push(block.code);
         } else if (validation.incomplete) {
+          this.cumulativeCode.push(block.code);
           incompleteGutterDecorations.push(blockRange);
 
           decorations.push({
@@ -674,12 +678,20 @@ print(json.dumps(result))
 
         if (!block.code.trim()) continue;
 
-        if (syntaxValidation && (!validation.valid || validation.incomplete)) {
+        if (syntaxValidation && !validation.valid && !validation.incomplete) {
           this.outputChannel.appendLine(
-            `[DEBUG] Skipping block ${i + 1}: ${
+            `[DEBUG] Skipping block ${i + 1}: invalid`
+          );
+          continue;
+        }
+
+        if (syntaxValidation && validation.incomplete) {
+          this.outputChannel.appendLine(
+            `[DEBUG] Adding incomplete block ${i + 1} to cumulative code: ${
               validation.incomplete ? "incomplete" : "invalid"
             }`
           );
+          this.cumulativeCode.push(block.code);
           continue;
         }
 
@@ -1005,23 +1017,16 @@ print(json.dumps(result))
       const indent = line.length - line.trimStart().length;
 
       if (evaluationMode === "explicit" && lineHasMarker(line)) {
-        if (currentBlock.length > 0) {
-          blocks.push({
-            code: currentBlock.join("\n"),
-            startLine: blockStartLine,
-            endLine: i - 1,
-          });
-        }
+        currentBlock.push(line);
         blocks.push({
-          code: line,
-          startLine: i,
+          code: currentBlock.join("\n"),
+          startLine: blockStartLine,
           endLine: i,
         });
         currentBlock = [];
         blockStartLine = i + 1;
         continue;
       }
-
       const isNewTopLevelBlock =
         startsNewBlock(line, indent) &&
         (indent === 0 || !inBlock || indent <= baseIndent);
