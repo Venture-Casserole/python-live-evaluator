@@ -584,9 +584,7 @@ print(json.dumps(result))
         const cumulativeCodeSoFar = [...this.cumulativeCode, block.code].join(
           "\n"
         );
-        console.log(cumulativeCodeSoFar);
         const validation = await this.validatePythonSyntax(cumulativeCodeSoFar);
-        console.log(validation);
         blockValidations.push(validation);
 
         this.outputChannel.appendLine(
@@ -954,6 +952,56 @@ print(json.dumps(result))
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  countUnclasedBrackets(blockLines) {
+    let openParens = 0;
+    let openBrackets = 0;
+    let openBraces = 0;
+
+    for (const line of blockLines) {
+      const trimmed = line.trim();
+      let inString = false;
+      let stringChar = null;
+      let escaped = false;
+
+      for (let i = 0; i < trimmed.length; i++) {
+        const char = trimmed[i];
+
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+
+        if (char === "\\") {
+          escaped = true;
+          continue;
+        }
+
+        if ((char === '"' || char === "'") && !inString) {
+          inString = true;
+          stringChar = char;
+          continue;
+        }
+
+        if (char === stringChar && inString) {
+          inString = false;
+          stringChar = null;
+          continue;
+        }
+
+        if (!inString) {
+          if (char === "(") openParens++;
+          else if (char === ")") openParens--;
+          else if (char === "[") openBrackets++;
+          else if (char === "]") openBrackets--;
+          else if (char === "{") openBraces++;
+          else if (char === "}") openBraces--;
+        }
+      }
+    }
+
+    return openParens + openBrackets + openBraces;
+  }
+
   parseIntoBlocks(lines) {
     const blocks = [];
     let currentBlock = [];
@@ -1018,6 +1066,12 @@ print(json.dumps(result))
 
       if (evaluationMode === "explicit" && lineHasMarker(line)) {
         currentBlock.push(line);
+
+        const unclasedBrackets = this.countUnclasedBrackets(currentBlock);
+        if (unclasedBrackets > 0) {
+          continue;
+        }
+
         blocks.push({
           code: currentBlock.join("\n"),
           startLine: blockStartLine,
@@ -1027,12 +1081,19 @@ print(json.dumps(result))
         blockStartLine = i + 1;
         continue;
       }
+
       const isNewTopLevelBlock =
         startsNewBlock(line, indent) &&
         (indent === 0 || !inBlock || indent <= baseIndent);
 
       if (isNewTopLevelBlock) {
         if (currentBlock.length > 0) {
+          const unclasedBrackets = this.countUnclasedBrackets(currentBlock);
+          if (unclasedBrackets > 0) {
+            currentBlock.push(line);
+            continue;
+          }
+
           blocks.push({
             code: currentBlock.join("\n"),
             startLine: blockStartLine,
@@ -1066,6 +1127,12 @@ print(json.dumps(result))
             });
           }
         } else if (indent === baseIndent && startsNewBlock(line, indent)) {
+          const unclasedBrackets = this.countUnclasedBrackets(currentBlock);
+          if (unclasedBrackets > 0) {
+            currentBlock.push(line);
+            continue;
+          }
+
           blocks.push({
             code: currentBlock.join("\n"),
             startLine: blockStartLine,
@@ -1086,6 +1153,12 @@ print(json.dumps(result))
             },
           ];
         } else if (indent <= baseIndent) {
+          const unclasedBrackets = this.countUnclasedBrackets(currentBlock);
+          if (unclasedBrackets > 0) {
+            currentBlock.push(line);
+            continue;
+          }
+
           blocks.push({
             code: currentBlock.join("\n"),
             startLine: blockStartLine,
@@ -1113,6 +1186,12 @@ print(json.dumps(result))
       } else {
         if (startsNewBlock(line, indent)) {
           if (currentBlock.length > 0) {
+            const unclasedBrackets = this.countUnclasedBrackets(currentBlock);
+            if (unclasedBrackets > 0) {
+              currentBlock.push(line);
+              continue;
+            }
+
             blocks.push({
               code: currentBlock.join("\n"),
               startLine: blockStartLine,
@@ -1132,6 +1211,12 @@ print(json.dumps(result))
           ];
         } else {
           if (currentBlock.length > 0 && indent === 0) {
+            const unclasedBrackets = this.countUnclasedBrackets(currentBlock);
+            if (unclasedBrackets > 0) {
+              currentBlock.push(line);
+              continue;
+            }
+
             blocks.push({
               code: currentBlock.join("\n"),
               startLine: blockStartLine,
@@ -1159,7 +1244,6 @@ print(json.dumps(result))
 
     return blocks;
   }
-
   evaluatePythonCode(fullCode, currentBlock, lineNumber) {
     return new Promise((resolve) => {
       const pythonCode = `
